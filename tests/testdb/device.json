@@ -1,0 +1,63 @@
+{
+  "configuration": {
+    "length": 32,
+    "type": "scan_chain"
+  },
+  "tiles": [
+    {
+      "type": "clb",
+      "x": 0,
+      "y": 0,
+      "offset": 0
+    },
+    {
+      "type": "clb",
+      "x": 1,
+      "y": 0,
+      "offset": 8
+    },
+    {
+      "type": "clb",
+      "x": 0,
+      "y": 1,
+      "offset": 16
+    },
+    {
+      "type": "clb",
+      "x": 1,
+      "y": 1,
+      "offset": 24
+    }
+  ],
+  "routing": [
+    {
+      "type": "sb",
+      "variant": 0,
+      "x": 0,
+      "y": 0,
+      "offset": 4
+    },
+    {
+      "type": "sb",
+      "variant": 0,
+      "x": 1,
+      "y": 0,
+      "offset": 12
+    },
+    {
+      "type": "sb",
+      "variant": 0,
+      "x": 0,
+      "y": 1,
+      "offset": 20
+    },
+    {
+      "type": "sb",
+      "variant": 0,
+      "x": 1,
+      "y": 1,
+      "offset": 28
+    }
+  ]
+}
+
