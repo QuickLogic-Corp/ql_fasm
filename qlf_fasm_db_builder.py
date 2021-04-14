@@ -228,6 +228,7 @@ def main():
     # Format the device data
     device = OrderedDict()
     device["configuration"] = {
+        "length": int(total_bits),
         "type": "scan_chain", # FIXME: For now only "scan_chain" is supported
     }
 
