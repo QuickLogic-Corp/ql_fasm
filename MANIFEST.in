@@ -1,0 +1,9 @@
+include *.rst
+exclude *.swp
+
+include LICENSE
+
+recursive-include qlf_fasm *.py
+
+recursive-include qlf_fasm/database *.db
+recursive-include qlf_fasm/database *.json
