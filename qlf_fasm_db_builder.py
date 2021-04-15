@@ -31,7 +31,7 @@ def make_segbit_sets(bits_by_loc):
 
     # First sort all bits by their names
     for loc in bits_by_loc.keys():
-        bits_by_loc[loc] = sorted(bits_by_loc[loc], key=lambda bit: bit[1])
+        bits_by_loc[loc] = sorted(bits_by_loc[loc], key=lambda bit: bit[2])
 
     locs = set(bits_by_loc.keys())
     segbit_sets = []
@@ -43,22 +43,26 @@ def make_segbit_sets(bits_by_loc):
         seed_bits = bits_by_loc[seed_loc]
 
         # Find bit offset of the seed tile
-        seed_offset = min([bit[0] for bit in seed_bits])
-        seed_segbits = [(bit[0] - seed_offset, bit[1]) for bit in seed_bits]
+        seed_offset = min([bit[1] for bit in seed_bits])
+        seed_segbits = [(bit[1] - seed_offset, bit[2]) for bit in seed_bits]
 
-        # Varify the segbits pattern against all tiles in the grid that do
+        # Verify the segbits pattern against all tiles in the grid that do
         # not have segbits assigned yet
         offsets = {}
         for loc in set(locs):
             bits = bits_by_loc[loc]
 
             # Compute offset and segbits
-            offset = min([bit[0] for bit in bits])
-            segbits = [(bit[0] - offset, bit[1]) for bit in bits]
+            regions = set([bit[0] for bit in bits])
+            assert len(regions) == 1, (loc, regions)
+
+            region = next(iter(regions))
+            offset = min([bit[1] for bit in bits])
+            segbits = [(bit[1] - offset, bit[2]) for bit in bits]
 
             # Check match and store
             if segbits == seed_segbits:
-                offsets[loc] = offset
+                offsets[loc] = (region, offset)
 
         # Must have at least 1 location
         assert offsets
@@ -75,55 +79,79 @@ def make_segbit_sets(bits_by_loc):
 
 def parse_fabric_bitstream(xml_root):
     """
-    Parses fabric bitstream XML. Returns bits as (id, name) grouped
-    by tile / switchbox types and grid locations.
+    Parses fabric bitstream XML. Returns two dictionaries. The first one holds
+    bits as (region_id, bit_id, name) grouped by tile / switchbox types and
+    grid locations. The second one contains regions as (offset, length) indexed
+    by their ids.
     """
 
     LOC_RE = re.compile(r"(?P<name>.+)_(?P<x>[0-9]+)__(?P<y>[0-9]+)_$")
 
     grouped_bits = {}
+    regions = {}
 
-    for xml_bit in xml_root.findall("bit"):
+    for xml_region in xml_root.findall("region"):
+        region_id = int(xml_region.attrib["id"])
 
-        # FIXME: For now only "scan_chain" configuration is supported. Check
-        # if the bitstream conforms to that
-        assert not xml_bit.find("wl") and not xml_bit.find("bl") \
-               and not xml_bit.find("frame"), "Only \"scan_chain\" configuration is supported"
+        region_min = None
+        region_max = None
 
-        # Get bit info
-        bit_id = int(xml_bit.attrib["id"])
-        feature = xml_bit.attrib["path"]
+        for xml_bit in xml_region.findall("bit"):
 
-        # Parse the feature name to get tile type and grid coordinates
-        parts = feature.split(".")
-        assert parts[0] == "fpga_top", feature
+            # FIXME: For now only "scan_chain" configuration is supported. Check
+            # if the bitstream conforms to that
+            assert not xml_bit.find("wl") and not xml_bit.find("bl") \
+                   and not xml_bit.find("frame"), "Only \"scan_chain\" configuration is supported"
 
-        # Get grid location
-        match = LOC_RE.fullmatch(parts[1])
-        assert match is not None, feature
+            # Get bit info
+            bit_id = int(xml_bit.attrib["id"])
+            feature = xml_bit.attrib["path"]
 
-        loc = (int(match.group("x")), int(match.group("y")))
-        name = match.group("name")
+            # Parse the feature name to get tile type and grid coordinates
+            parts = feature.split(".")
+            assert parts[0] == "fpga_top", feature
 
-        # This bit refers to a block (tile)
-        if name.startswith("grid_"):
-            name = name.replace("grid_", "")
+            # Get grid location
+            match = LOC_RE.fullmatch(parts[1])
+            assert match is not None, feature
 
-        # This bit refers to a routing interconnect
-        else:
-            name = name.split("_", maxsplit=1)[0]
-            assert name in ["sb", "cbx", "cby"], feature
+            loc = (int(match.group("x")), int(match.group("y")))
+            name = match.group("name")
 
-        # Store the bit
-        if name not in grouped_bits:
-            grouped_bits[name] = {}
+            # This bit refers to a block (tile)
+            if name.startswith("grid_"):
+                name = name.replace("grid_", "")
 
-        if loc not in grouped_bits[name]:
-            grouped_bits[name][loc] = set()
+            # This bit refers to a routing interconnect
+            else:
+                name = name.split("_", maxsplit=1)[0]
+                assert name in ["sb", "cbx", "cby"], feature
 
-        grouped_bits[name][loc].add((bit_id, ".".join(parts[2:])))
+            # Store the bit
+            if name not in grouped_bits:
+                grouped_bits[name] = {}
 
-    return grouped_bits
+            if loc not in grouped_bits[name]:
+                grouped_bits[name][loc] = set()
+
+            grouped_bits[name][loc].add((region_id, bit_id, ".".join(parts[2:])))
+
+            # Determine bit region extent
+            if region_min is None:
+                region_min = bit_id
+            else:
+                region_min = min(region_min, bit_id)
+
+            if region_max is None:
+                region_max = bit_id
+            else:
+                region_max = max(region_max, bit_id)
+
+        # Add region
+        assert region_id not in regions, region_id
+        regions[region_id] = (region_min, region_max - region_min + 1)
+
+    return grouped_bits, regions
 
 # =============================================================================
 
@@ -158,14 +186,34 @@ def main():
     assert xml_bitstream is not None and xml_bitstream.tag == "fabric_bitstream"
 
     # Parse the bitstream, group bits and features
-    grouped_bits = parse_fabric_bitstream(xml_bitstream)
+    grouped_bits, regions = parse_fabric_bitstream(xml_bitstream)
 
     # Count bits
+    print("Counting bits...")
     total_bits = 0
-    for tile_type, bits_at_loc in grouped_bits.items():
-        for loc, bits in bits_at_loc.items():
-            total_bits += len(bits)
+
+    print(" {} regions:".format(len(regions)))
+    for region_id, (offset, count) in regions.items():
+        total_bits += count
+        print("  region {:2d}: {} bits ({}-{})".format(
+            region_id,
+            count,
+            offset,
+            offset + count - 1
+        ))
+
     print(" {} bits in total".format(total_bits))
+
+    # No bits
+    if not total_bits:
+        print("The bitstream contains no bits")
+        exit(1)
+
+    # Verify that all bits of a tile / switchbox belong to the same region.
+    for tile_name, bits_at_loc in grouped_bits.items():
+        for loc, bits in bits_at_loc.items():
+            regs = set([bit[0] for bit in bits])
+            assert len(regs) == 1, (tile_name, loc, regs)
 
     # Build segbits for each tile type
     print("Building segbits database...")
@@ -209,9 +257,15 @@ def main():
                 item_at_loc[item_type] = {}
 
             type = tile_type if item_type == "tile" else i
-            for loc, offset in offsets.items():                
+            for loc, (region, offset) in offsets.items():                
                 assert loc not in item_at_loc[item_type], (type, loc)
-                item_at_loc[item_type][loc] = (type, offset)
+
+                # Subtract region offset
+                assert region in regions, region
+                offset = offset - regions[region][0]
+                assert offset >= 0, offset
+
+                item_at_loc[item_type][loc] = (type, region, offset)
 
             # Write segbits file
             fname = os.path.join(args.output_dir, "segbits_{}{}.db".format(tile_type, suffix))
@@ -226,11 +280,20 @@ def main():
     assert total_bits == total_bits_unflattened, (total_bits, total_bits_unflattened)
 
     # Format the device data
+    print("Formatting the device file...")
     device = OrderedDict()
     device["configuration"] = {
         "length": int(total_bits),
         "type": "scan_chain", # FIXME: For now only "scan_chain" is supported
+        "regions": []
     }
+    
+    for region_id, (offset, count) in regions.items():
+        device["configuration"]["regions"].append({
+            "id": region_id,
+            "offset": int(offset),
+            "length": int(count),
+        })
 
     device["tiles"] = []
     device["routing"] = []
@@ -241,22 +304,24 @@ def main():
 
         if item_type == "tile":
             for loc in sorted(items.keys(), key=lambda x:x[::-1]):
-                (tile_type, offset) = items[loc]
+                (tile_type, region, offset) = items[loc]
                 device["tiles"].append({
                     "type": tile_type,
                     "x": int(loc[0]),
                     "y": int(loc[1]),
+                    "region": int(region),
                     "offset": int(offset),
                 })
 
         else:
             for loc in sorted(items.keys(), key=lambda x:x[::-1]):
-                (variant, offset) = items[loc]
+                (variant, region, offset) = items[loc]
                 device["routing"].append({
                     "type": item_type,
                     "variant": int(variant),
                     "x": int(loc[0]),
                     "y": int(loc[1]),
+                    "region": int(region),
                     "offset": int(offset),
                 })
 
@@ -265,6 +330,7 @@ def main():
     with open(fname, "w") as fp:
         json.dump(device, fp, indent=2)
 
+    print("Done.")
 
 if __name__ == "__main__":
     main()
