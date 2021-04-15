@@ -1,11 +1,12 @@
 # FASM to/from bitstream converter for QuickLogic qlf FPGA device family
 
-Currently done:
- * FASM database generation
+## FASM to/from bitstream conversion
 
-Work in progress:
- * FASM to bitstream conversion
- * Bitstream to FASM disassembly
+Invoke the `qlf_fasm.py` utility script, provide it with a path to a device database along with input and output file name. The tool automatically determines the conversion direction basing on file name extensions. A FASM file name must end with `.fasm` while a bitstream file on `.bit` or `.bin`.
+
+For example:
+ - `qlf_fasm.py --db-root qlf_fasm/database/qlf_k4n8 design.fasm bitstream.bit`
+ - `qlf_fasm.py --db-root qlf_fasm/database/qlf_k4n8 bitstream.bit disassembled.fasm`
 
 ## Database generation
 
