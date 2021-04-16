@@ -435,6 +435,16 @@ def main():
         help="Output file (FASM or bitstream)"
     )
     parser.add_argument(
+        "-a", "--assemble",
+        action="store_true",
+        help="Force FASM to bitstream conversion regardless of file extensions"
+    )
+    parser.add_argument(
+        "-d", "--disassemble",
+        action="store_true",
+        help="Force bitstream to FASM conversion regardless of file extensions"
+    )
+    parser.add_argument(
         "--device",
         type=str,
         choices=["qlf_k4n8"],
@@ -478,10 +488,20 @@ def main():
         exit(1)
 
     # Check what to do
+    if args.assemble and args.disassemble:
+        logging.critical("Please specify either '-a' or '-d'")
+        exit(1)
+
     inp_ext = os.path.splitext(args.i)[1].lower()
     out_ext = os.path.splitext(args.o)[1].lower()
 
-    if inp_ext == ".fasm" and out_ext in [".bit", ".bin"]:
+    if args.assemble:
+        action = "fasm2bit"
+
+    elif args.disassemble:
+        action = "bit2fasm"
+
+    elif inp_ext == ".fasm" and out_ext in [".bit", ".bin"]:
         action = "fasm2bit"
 
     elif out_ext == ".fasm" and inp_ext in [".bit", ".bin"]:
