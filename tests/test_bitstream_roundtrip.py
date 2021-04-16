@@ -3,6 +3,7 @@ import os
 import sys
 import tempfile
 import subprocess
+import tarfile
 
 # =============================================================================
 
@@ -13,13 +14,18 @@ def test_bitstream_roundtrip():
     """
 
     basedir = os.path.dirname(__file__)
-    qlf_fasm = os.path.join(basedir, "..", "qlf_fasm", "qlf_fasm.py")
+    qlf_fasm = "python3 -m qlf_fasm"
 
     with tempfile.TemporaryDirectory() as tempdir:
 
+        # Unpack the bitstream
+        bitstream = os.path.join(basedir, "data", "qlf_k4n8-counter.bit.tar.gz")
+        tar = tarfile.open(name=bitstream, mode="r:gz")
+        tar.extractall(path=tempdir)
+
         # Disassemble the bitstream
         database = os.path.join(basedir, "..", "qlf_fasm", "database", "qlf_k4n8")
-        bitstream1 = os.path.join(basedir, "data", "qlf_k4n8-counter.bit")
+        bitstream1 = os.path.join(tempdir, os.path.basename(bitstream).replace(".tar.gz", ""))
         fasm1 = os.path.join(tempdir, "fasm1.fasm")
 
         args = "{} --db-root {} {} {}".format(
