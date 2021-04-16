@@ -16,9 +16,13 @@ from .bitstream import TextBitstream
 
 # =============================================================================
 
+# Known databases
 DATABASES = {
     "qlf_k4n8": pkg_resources.resource_filename("qlf_fasm", "database/qlf_k4n8")
 }
+
+# Common FASM feature prefix
+FEATURE_PREFIX = "fpga_top"
 
 # =============================================================================
 
@@ -28,6 +32,10 @@ class QlfFasmAssembler():
     FASM assembler for QuickLogic QLF devices.
     """
 
+    # A regular expression for FASM feature grid location tags. For example:
+    # - "grid_clb_1__4_"
+    # - "sb_20__2_"
+    # - "cbx_2__5_"
     LOC_RE = re.compile(r"(?P<name>.+)_(?P<x>[0-9]+)__(?P<y>[0-9]+)_$")
 
     class LookupError(Exception):
@@ -64,7 +72,7 @@ class QlfFasmAssembler():
 
         # Split the feature name into parts, check the first part
         parts = set_feature.feature.split(".")
-        if len(parts) < 3 or parts[0] != "fpga_top":
+        if len(parts) < 3 or parts[0] != FEATURE_PREFIX:
             raise self.LookupError
 
         # Get grid location
@@ -253,7 +261,7 @@ class QlfFasmDisassembler():
             segbits = self.database.segbits[segbits_name]
 
             # Format feature prefix
-            prefix = "fpga_top.grid_{}_{}__{}_".format(
+            prefix = FEATURE_PREFIX + ".grid_{}_{}__{}_".format(
                 tile["type"],
                 loc[0],
                 loc[1]
@@ -286,7 +294,7 @@ class QlfFasmDisassembler():
                 segbits = self.database.segbits[segbits_name]
 
                 # Format feature prefix
-                prefix = "fpga_top.{}_{}__{}_".format(
+                prefix = FEATURE_PREFIX + ".{}_{}__{}_".format(
                     sbox["type"],
                     loc[0],
                     loc[1]
