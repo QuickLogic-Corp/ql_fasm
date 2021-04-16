@@ -7,6 +7,7 @@ import argparse
 import os
 import re
 import json
+import logging
 
 from collections import OrderedDict
 
@@ -176,11 +177,24 @@ def main():
         default="database",
         help="Output FASM database directory"
     )
+    parser.add_argument(
+        "--log-level",
+        type=str,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="WARNING",
+        help="Log level (def. \"WARNING\")"
+    )
 
     args = parser.parse_args()
 
+    # Setup logging
+    logging.basicConfig(
+        format="%(message)s",
+        level=getattr(logging, args.log_level.upper()),
+    )
+
     # Read and parse the fabric bitstream XML techfile
-    print("Loading fabric-dependent bitstream ...")
+    logging.info("Loading fabric-dependent bitstream ...")
     xml_tree = ET.parse(args.fabric_bitstream, ET.XMLParser(remove_blank_text=True))
     xml_bitstream = xml_tree.getroot()
     assert xml_bitstream is not None and xml_bitstream.tag == "fabric_bitstream"
@@ -189,24 +203,24 @@ def main():
     grouped_bits, regions = parse_fabric_bitstream(xml_bitstream)
 
     # Count bits
-    print("Counting bits...")
+    logging.info("Counting bits...")
     total_bits = 0
 
-    print(" {} regions:".format(len(regions)))
+    logging.info(" {} regions:".format(len(regions)))
     for region_id, (offset, count) in regions.items():
         total_bits += count
-        print("  region {:2d}: {} bits ({}-{})".format(
+        logging.debug("  region {:2d}: {} bits ({}-{})".format(
             region_id,
             count,
             offset,
             offset + count - 1
         ))
 
-    print(" {} bits in total".format(total_bits))
+    logging.info(" {} bits in total".format(total_bits))
 
     # No bits
     if not total_bits:
-        print("The bitstream contains no bits")
+        logging.critical("The bitstream contains no bits")
         exit(1)
 
     # Verify that all bits of a tile / switchbox belong to the same region.
@@ -216,14 +230,14 @@ def main():
             assert len(regs) == 1, (tile_name, loc, regs)
 
     # Build segbits for each tile type
-    print("Building segbits database...")
+    logging.info("Building segbits database...")
     os.makedirs(args.output_dir, exist_ok=True)
 
     item_at_loc = {}
     total_bits_unflattened = 0
 
     for tile_type, bits_at_loc in grouped_bits.items():
-        print("", tile_type)
+        logging.debug(" " + tile_type)
 
         # Check if we have a tile or a switchbox / connection box
         if tile_type in ["sb", "cbx", "cby"]:
@@ -234,9 +248,9 @@ def main():
         # Build segbit sets
         segbit_sets = make_segbit_sets(bits_at_loc)
 
-        print(" ", "{} segbit sets:".format(len(segbit_sets)))
+        logging.debug("  {} segbit sets:".format(len(segbit_sets)))
         for segbits, offsets in segbit_sets:
-            print("  ", "{} segbits, {} locations".format(len(segbits), len(offsets)))
+            logging.debug("   {} segbits, {} locations".format(len(segbits), len(offsets)))
 
         # A tile must not have more than one segbits set - tiles should be
         # identical independent of their location in the grid
@@ -280,7 +294,7 @@ def main():
     assert total_bits == total_bits_unflattened, (total_bits, total_bits_unflattened)
 
     # Format the device data
-    print("Formatting the device file...")
+    logging.info("Formatting the device file...")
     device = OrderedDict()
     device["configuration"] = {
         "length": int(total_bits),
@@ -330,7 +344,7 @@ def main():
     with open(fname, "w") as fp:
         json.dump(device, fp, indent=2)
 
-    print("Done.")
+    logging.info("Done.")
 
 if __name__ == "__main__":
     main()
