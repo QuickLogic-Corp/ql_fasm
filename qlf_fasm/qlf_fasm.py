@@ -7,7 +7,6 @@ import argparse
 import os
 import re
 import logging
-import pkg_resources
 
 import fasm
 
@@ -15,11 +14,6 @@ from .database import Bit, Database
 from .bitstream import TextBitstream, FourByteBitstream
 
 # =============================================================================
-
-# Known databases
-DATABASES = {
-    "qlf_k4n8": pkg_resources.resource_filename("qlf_fasm", "database/qlf_k4n8")
-}
 
 # Common FASM feature prefix
 FEATURE_PREFIX = "fpga_top"
@@ -424,17 +418,10 @@ def main():
         help="Force bitstream to FASM conversion regardless of file extensions"
     )
     parser.add_argument(
-        "--device",
-        type=str,
-        choices=["qlf_k4n8"],
-        default=None,
-        help="Device name"
-    )
-    parser.add_argument(
         "--db-root",
         type=str,
-        default=None,
-        help="FASM database root path, required when --device is not given"
+        required=True,
+        help="FASM database root path"
     )
     parser.add_argument(
         "--unset-features",
@@ -456,15 +443,6 @@ def main():
         format="%(message)s",
         level=getattr(logging, args.log_level.upper()),
     )
-
-    # Determine device database path
-    if args.db_root is not None:
-        db_root = args.db_root
-    elif args.device is not None:
-        db_root = DATABASES[args.device]
-    else:
-        logging.critical("Please provide either '--device' or '--db-root' option")
-        exit(1)
 
     # Check what to do
     if args.assemble and args.disassemble:
@@ -494,7 +472,7 @@ def main():
         exit(-1)
 
     # Load the database
-    database = Database(db_root)
+    database = Database(args.db_root)
 
     if action == "fasm2bit":
         fasm_to_bitstream(args, database)
