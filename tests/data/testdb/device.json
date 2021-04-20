@@ -1,0 +1,82 @@
+{
+  "configuration": {
+    "length": 32,
+    "type": "scan_chain",
+    "regions": [
+      {
+        "id": 0,
+        "offset": 0,
+        "length": 16
+      },
+      {
+        "id": 1,
+        "offset": 16,
+        "length": 16
+      }
+    ]
+  },
+  "tiles": [
+    {
+      "type": "clb",
+      "x": 0,
+      "y": 0,
+      "region": 0,
+      "offset": 0
+    },
+    {
+      "type": "clb",
+      "x": 1,
+      "y": 0,
+      "region": 0,
+      "offset": 4
+    },
+    {
+      "type": "clb",
+      "x": 0,
+      "y": 1,
+      "region": 0,
+      "offset": 8
+    },
+    {
+      "type": "clb",
+      "x": 1,
+      "y": 1,
+      "region": 0,
+      "offset": 12
+    }
+  ],
+  "routing": [
+    {
+      "type": "sb",
+      "variant": 0,
+      "x": 0,
+      "y": 0,
+      "region": 1,
+      "offset": 0
+    },
+    {
+      "type": "sb",
+      "variant": 0,
+      "x": 1,
+      "y": 0,
+      "region": 1,
+      "offset": 4
+    },
+    {
+      "type": "sb",
+      "variant": 0,
+      "x": 0,
+      "y": 1,
+      "region": 1,
+      "offset": 8
+    },
+    {
+      "type": "sb",
+      "variant": 0,
+      "x": 1,
+      "y": 1,
+      "region": 1,
+      "offset": 12
+    }
+  ]
+}

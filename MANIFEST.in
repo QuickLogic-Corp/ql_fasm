@@ -1,0 +1,6 @@
+include *.rst
+exclude *.swp
+
+include LICENSE
+
+recursive-include qlf_fasm *.py
