@@ -12,7 +12,7 @@ import pkg_resources
 import fasm
 
 from .database import Bit, Database
-from .bitstream import TextBitstream
+from .bitstream import TextBitstream, FourByteBitstream
 
 # =============================================================================
 
@@ -345,25 +345,15 @@ def fasm_to_bitstream(args, database):
             logging.critical(" " + feature.set_feature.feature)
         exit(-1)
 
-    # Compute the expected total length with padding bits
-    max_region = max([region["length"] for region in database.regions.values()])
-    padded_length = max_region * len(database.regions)
-
-    # Pad the bitstream - add trailing zeros to each chain (region) that is
-    # shorter than the longest one.
-    padded_bitstream = bytearray(padded_length)
-    for region_id, region in database.regions.items():
-
-        dst_address = region_id * max_region
-        src_address = region["offset"]
-        length = region["length"]
-
-        padded_bitstream[dst_address:dst_address+length] = \
-            assembler.bitstream[src_address:src_address+length]
-
-    # Write the bitstream
+    # Build the binary bitstream
     logging.info("Writing bitstream...")
-    bitstream = TextBitstream(padded_bitstream)
+    if args.format == "txt":
+        bitstream = TextBitstream.from_bits(assembler.bitstream, database)
+    elif args.format == "4byte":
+        bitstream = FourByteBitstream.from_bits(assembler.bitstream, database)
+    else:
+        assert False, args.format
+
     bitstream.to_file(args.o)
 
 
@@ -374,44 +364,18 @@ def bitstream_to_fasm(args, database):
 
     # Load the binary bitstream
     logging.info("Reading bitstream...")
-    bitstream = TextBitstream.from_file(args.i)
-
-    # Compute the expected total length with padding bits
-    max_region = max([region["length"] for region in database.regions.values()])
-    padded_length = max_region * len(database.regions)
-
-    # Verify length
-    if len(bitstream.bits) < padded_length:
-        logging.error("ERROR: The bistream is too short ({} / {})".format(
-            len(bitstream.bits),
-            padded_length
-        ))
-        # TODO: pad
-
-    if len(bitstream.bits) > padded_length:
-        logging.warning("WARNING: {} extra trailing bits found ({} / {})".format(
-            len(bitstream.bits) - padded_length,
-            len(bitstream.bits),
-            padded_length
-        ))
-        # TODO: trim
-
-    # Remove padding bits
-    unpadded_bitstream = bytearray(database.bitstream_size)
-    for region_id, region in database.regions.items():
-
-        src_address = region_id * max_region
-        dst_address = region["offset"]
-        length = region["length"]
-
-        unpadded_bitstream[dst_address:dst_address+length] = \
-            bitstream.bits[src_address:src_address+length]
+    if args.format == "txt":
+        bitstream = TextBitstream.from_file(args.i)
+    elif args.format == "4byte":
+        bitstream = FourByteBitstream.from_file(args.i)
+    else:
+        assert False, args.format
 
     # Disassemble
     logging.info("Disassembling bitstream...")
     disassembler = QlfFasmDisassembler(database)
     features = disassembler.disassemble_bitstream(
-        unpadded_bitstream,
+        bitstream.to_bits(database),
         args.unset_features
     )
 
@@ -441,6 +405,13 @@ def main():
         "o",
         type=str,
         help="Output file (FASM or bitstream)"
+    )
+    parser.add_argument(
+        "-f", "--format",
+        type=str,
+        choices=["txt", "4byte"],
+        default="4byte",
+        help="Binary bitstream format (def. '4byte')"
     )
     parser.add_argument(
         "-a", "--assemble",
