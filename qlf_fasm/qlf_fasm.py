@@ -20,6 +20,77 @@ FEATURE_PREFIX = "fpga_top"
 
 # =============================================================================
 
+def canonical_features(set_feature):
+    """ 
+    Yield SetFasmFeature tuples that are of canonical form. EG width 1, and
+    value 1. As opposed to the function form the fasm package this one also
+    returns cleared features (of value 0)
+    """
+
+    if set_feature.start is None:
+        assert set_feature.end is None
+        yield fasm.SetFasmFeature(
+            feature=set_feature.feature,
+            start=None,
+            end=None,
+            value=set_feature.value,
+            value_format=None,
+        )
+
+        return
+
+    if set_feature.start is not None and set_feature.end is None:
+        if set_feature.start == 0:
+            yield fasm.SetFasmFeature(
+                feature=set_feature.feature,
+                start=None,
+                end=None,
+                value=set_feature.value,
+                value_format=None,
+            )
+        else:
+            yield fasm.SetFasmFeature(
+                feature=set_feature.feature,
+                start=set_feature.start,
+                end=None,
+                value=set_feature.value,
+                value_format=None,
+            )
+
+        return
+
+    assert set_feature.start is not None
+    assert set_feature.start >= 0
+    assert set_feature.end >= set_feature.start
+
+    for address in range(set_feature.start, set_feature.end + 1):
+        value = (set_feature.value >> (address - set_feature.start)) & 1
+        if address == 0:
+            yield fasm.SetFasmFeature(
+                feature=set_feature.feature,
+                start=None,
+                end=None,
+                value=value,
+                value_format=None,
+            )
+        else:
+            yield fasm.SetFasmFeature(
+                feature=set_feature.feature,
+                start=address,
+                end=None,
+                value=value,
+                value_format=None,
+            )
+
+# =============================================================================
+
+
+class QlfFasmException(Exception):
+    """
+    Generic FASM encoder/decoder exception
+    """
+    pass
+
 
 class QlfFasmAssembler():
     """
@@ -32,13 +103,13 @@ class QlfFasmAssembler():
     # - "cbx_2__5_"
     LOC_RE = re.compile(r"(?P<name>.+)_(?P<x>[0-9]+)__(?P<y>[0-9]+)_$")
 
-    class LookupError(Exception):
+    class LookupError(QlfFasmException):
         """
         FASM database lookup error exception
         """
         pass
 
-    class FeatureConflict(Exception):
+    class FeatureConflict(QlfFasmException):
         """
         FASM feature conflict exception
         """
@@ -48,6 +119,7 @@ class QlfFasmAssembler():
         self.bitstream = bytearray(database.bitstream_size)
         self.database = database
 
+        self.features = {}
         self.features_by_bits = {}
 
     def process_fasm_line(self, line):
@@ -57,11 +129,7 @@ class QlfFasmAssembler():
         """
 
         set_feature = line.set_feature
-        if not set_feature:
-            return
-
-        # Ignore features that are not set
-        if set_feature.value == 0:
+        if set_feature is None:
             return
 
         # Split the feature name into parts, check the first part
@@ -117,12 +185,37 @@ class QlfFasmAssembler():
         # Add region offset
         offset += self.database.regions[region]["offset"]
 
+        # Format the line feature and value string to be used for error
+        # checking and user messaging
+        line_str = next(iter(fasm.fasm_line_to_string(line)))
+
         # Canonicalize - split to single-bit features and process them
         # individually
-        for one_feature in fasm.canonical_features(set_feature):
+        for one_feature in canonical_features(set_feature):
+            assert one_feature.value in [0, 1], one_feature
+
+            # Feature bit index
+            one_feature_idx = 0
+            if one_feature.start is not None:
+                one_feature_idx = one_feature.start
+
+            # Check for feature value conflict
+            key = (one_feature.feature, one_feature_idx)
+            if key in self.features:
+                other_value, other_line_str = self.features[key]
+                if one_feature.value != other_value:
+
+                    msg = "The FASM line '{}' conflicts with '{}'".format(
+                        line_str,
+                        other_line_str
+                    )
+                    raise self.FeatureConflict(msg)
+
+            # Track feature values
+            else:
+                self.features[key] = (one_feature.value, line_str)
 
             # Skip cleared features
-            assert one_feature.value in [0, 1], one_feature
             if one_feature.value == 0:
                 continue
 
@@ -138,8 +231,7 @@ class QlfFasmAssembler():
 
             # Try with index
             if bits is None:
-                idx = 0 if one_feature.start is None else one_feature.start
-                key = "{}[{}]".format(base_name, idx)
+                key = "{}[{}]".format(base_name, one_feature_idx)
                 bits = segbits.get(key, None)
 
             if bits is None:
@@ -159,19 +251,18 @@ class QlfFasmAssembler():
 
                 # Check for conflict
                 if address in self.features_by_bits:
-                    if key in self.features_by_bits[address] and \
-                       bit.val != self.bitstream[address]:
+                    if bit.val != self.bitstream[address]:
 
                         new_bit_act = "set" if bit.val else "clear"
                         org_bit_act = "set" if self.bitstream[address] else "cleared"
 
                         # Format the error message
                         msg = "The line '{}' wants to {} bit {} already {} by the line '{}'".format(
-                            set_feature.feature,
+                            line_str,
                             new_bit_act,
                             bit.id,
                             org_bit_act,
-                            key
+                            self.features_by_bits[address]
                         )
                         raise self.FeatureConflict(msg)
                 else:
@@ -179,7 +270,7 @@ class QlfFasmAssembler():
 
                 # Set/clear the bit
                 self.bitstream[address] = bit.val
-                self.features_by_bits[address].add(key)
+                self.features_by_bits[address].add(line_str)
 
 
     def assemble_bitstream(self, fasm_lines):
@@ -474,17 +565,19 @@ def main():
     # Load the database
     database = Database(args.db_root)
 
-    if action == "fasm2bit":
-        fasm_to_bitstream(args, database)
+    # Do the conversion
+    try:
+        if action == "fasm2bit":
+            fasm_to_bitstream(args, database)
+        elif action == "bit2fasm":
+            bitstream_to_fasm(args, database)
+        else:
+            assert False, action
 
-    elif action == "bit2fasm":
-        bitstream_to_fasm(args, database)
-
-    else:
-        assert False, action
+    except QlfFasmException as ex:
+        logging.critical("ERROR: " + str(ex))
 
 # =============================================================================
-
 
 if __name__ == "__main__":
     main()
