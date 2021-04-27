@@ -16,6 +16,9 @@ def bitstream_roundtrip(bitstream_file, bitstream_format):
     basedir = os.path.dirname(__file__)
     qlf_fasm = "python3 -m qlf_fasm"
 
+    db_root = os.environ.get("QLF_FASM_DB_ROOT", None)
+    assert db_root is not None, "QLF_FASM_DB_ROOT env. variable not set"
+
     with tempfile.TemporaryDirectory() as tempdir:
 
         # Unpack the bitstream
@@ -24,13 +27,12 @@ def bitstream_roundtrip(bitstream_file, bitstream_format):
         tar.extractall(path=tempdir)
 
         # Disassemble the bitstream
-        database = os.path.join(basedir, "..", "qlf_fasm", "database", "qlf_k4n8")
         bitstream1 = os.path.join(tempdir, os.path.basename(bitstream).replace(".tar.gz", ""))
         fasm1 = os.path.join(tempdir, "fasm1.fasm")
 
         args = "{} --db-root {} {} {} -d -f {}".format(
             qlf_fasm,
-            database,
+            db_root,
             bitstream1,
             fasm1,
             bitstream_format
@@ -41,7 +43,7 @@ def bitstream_roundtrip(bitstream_file, bitstream_format):
         bitstream2 = os.path.join(tempdir, "bitstream2.bit")
         args = "{} --db-root {} {} {} -a -f {}".format(
             qlf_fasm,
-            database,
+            db_root,
             fasm1,
             bitstream2,
             bitstream_format
@@ -52,7 +54,7 @@ def bitstream_roundtrip(bitstream_file, bitstream_format):
         fasm2 = os.path.join(tempdir, "fasm2.fasm")
         args = "{} --db-root {} {} {} -d -f {}".format(
             qlf_fasm,
-            database,
+            db_root,
             bitstream2,
             fasm2,
             bitstream_format
