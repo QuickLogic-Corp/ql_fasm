@@ -5,6 +5,8 @@ import tempfile
 import subprocess
 import tarfile
 
+import pytest
+
 # =============================================================================
 
 
@@ -15,9 +17,7 @@ def bitstream_roundtrip(bitstream_file, bitstream_format):
 
     basedir = os.path.dirname(__file__)
     qlf_fasm = "python3 -m qlf_fasm"
-
     db_root = os.environ.get("QLF_FASM_DB_ROOT", None)
-    assert db_root is not None, "QLF_FASM_DB_ROOT env. variable not set"
 
     with tempfile.TemporaryDirectory() as tempdir:
 
@@ -70,8 +70,10 @@ def bitstream_roundtrip(bitstream_file, bitstream_format):
         assert fasm_lines1 == fasm_lines2
 
 
+@pytest.mark.skipif("QLF_FASM_DB_ROOT" not in os.environ, reason="QLF_FASM_DB_ROOT not set")
 def test_txt_bitstream_roundtrip():
     bitstream_roundtrip("qlf_k4n8-counter.bit.tar.gz", "txt")
 
+@pytest.mark.skipif("QLF_FASM_DB_ROOT" not in os.environ, reason="QLF_FASM_DB_ROOT not set")
 def test_4byte_bitstream_roundtrip():
     bitstream_roundtrip("qlf_k4n8-and.hex.tar.gz", "4byte")

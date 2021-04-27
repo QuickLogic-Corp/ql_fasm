@@ -576,6 +576,7 @@ def main():
 
     except QlfFasmException as ex:
         logging.critical("ERROR: " + str(ex))
+        exit(-1)
 
 # =============================================================================
 
