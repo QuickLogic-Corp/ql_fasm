@@ -120,6 +120,7 @@ class QlfFasmAssembler():
         self.database = database
 
         self.features = {}
+        self.force_bit_features = {}
         self.features_by_bits = {}
 
     def process_fasm_line(self, line):
@@ -151,9 +152,9 @@ class QlfFasmAssembler():
 
             # Check
             if loc not in self.database.tiles:
-                 raise self.LookupError
+                raise self.LookupError
             if name not in self.database.segbits:
-                 raise self.LookupError
+                raise self.LookupError
 
             # Get segbits and offset
             tile = self.database.tiles[loc]
@@ -166,16 +167,16 @@ class QlfFasmAssembler():
             name = name.split("_", maxsplit=1)[0]
 
             if loc not in self.database.routing:
-                 raise self.LookupError
+                raise self.LookupError
             if name not in self.database.routing[loc]:
-                 raise self.LookupError
+                raise self.LookupError
 
             # Get the routing resource variant
             sbox = self.database.routing[loc][name]
             segbits_name = "{}_{}".format(name, sbox["variant"])
 
             if segbits_name not in self.database.segbits:
-                 raise self.LookupError
+                raise self.LookupError
 
             # Get segbits and offset
             segbits = self.database.segbits[segbits_name]
@@ -326,16 +327,20 @@ class QlfFasmDisassembler():
         Disassembles a bistream.
         """
         features = []
+        force_bit_features = []
 
         def emit_feature(feature):
+            force_str = "force {}=1'b{};".format(feature, int(value))
+            str = feature
             if emit_unset:
-                features.append(full_name + "=1'b{}".format(int(value)))
-            else:
-                features.append(full_name)
+                str = "{}=1'b{}".format(feature, int(value))
+
+            features.append(str)
+            force_bit_features.append(force_str)
 
         # Check size
         assert len(bitstream) == self.database.bitstream_size
-        self.bitstream = bitstream    
+        self.bitstream = bitstream
 
         # Disassemble tiles
         for loc, tile in self.database.tiles.items():
@@ -359,7 +364,6 @@ class QlfFasmDisassembler():
             offset += self.database.regions[region]["offset"]
 
             for feature, bits in segbits.items():
-
                 # Match
                 value = self.match_segbits(bits, offset)
                 if not value and not emit_unset:
@@ -402,7 +406,7 @@ class QlfFasmDisassembler():
                     full_name = prefix + "." + feature
                     emit_feature(full_name)
 
-        return features
+        return features, force_bit_features
 
 # =============================================================================
 
@@ -459,16 +463,24 @@ def bitstream_to_fasm(args, database):
     # Disassemble
     logging.info("Disassembling bitstream...")
     disassembler = QlfFasmDisassembler(database)
-    features = disassembler.disassemble_bitstream(
-        bitstream.to_bits(database),
-        args.unset_features
-    )
+    features, force_bit_features = disassembler.disassemble_bitstream(
+        bitstream.to_bits(database), args.unset_features)
 
     # Write FASM file
     logging.info("Writing FASM file...")
     with open(args.o, "w") as fp:
         for feature in features:
             fp.write(feature + "\n")
+
+    # Write Force bit file
+    logging.info("Writing Force bit file...")
+    split_file = os.path.splitext(args.o)
+    force_bit_file = "{}.force_bit".format(split_file[0])
+    with open(force_bit_file, "w") as fp:
+        for feature in force_bit_features:
+            fp.write(feature + "\n")
+
+
 
 # =============================================================================
 
