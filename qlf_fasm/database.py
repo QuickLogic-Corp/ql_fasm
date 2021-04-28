@@ -5,6 +5,7 @@ Classes for representing QLF device databases
 import os
 import logging
 import json
+import re
 
 # =============================================================================
 
@@ -52,6 +53,10 @@ class Database():
     """
     FASM database representation.
     """
+
+    FEATURE_RE = re.compile(
+        r"^(?P<feature>[^\[\]\s]+)(\[(?P<index>[0-9]+)\])?$"
+    )
 
     def __init__(self, root=None):
 
@@ -139,7 +144,6 @@ class Database():
         Loads segbits. Returns a dict indexed by FASM feature names containing
         segbit sets.
         """
-        segbits = {}
 
         # Load the file
         logging.info(" " + file_name)
@@ -147,6 +151,7 @@ class Database():
             lines = fp.readlines()
 
         # Parse segbits
+        segbits = {}
         for line in lines:
 
             line = line.strip().split()
@@ -161,6 +166,26 @@ class Database():
             assert feature not in segbits, feature
             segbits[feature] = tuple(bits)
 
-        return segbits
+        # Group multi-bit features together
+        grouped_segbits = {}
+        for tag, bits in segbits.items():
+
+            # Get the base name and index
+            match = Database.FEATURE_RE.fullmatch(tag)
+            assert match is not None, tag
+
+            feature = match.group("feature")
+            index = match.group("index")
+
+            if index is not None:
+                index = int(index)
+
+            # Group accordingly
+            if feature not in grouped_segbits:
+                grouped_segbits[feature] = {}
+
+            grouped_segbits[feature][index] = bits
+
+        return grouped_segbits
 
 

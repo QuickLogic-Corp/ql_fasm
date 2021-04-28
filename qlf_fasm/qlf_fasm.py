@@ -223,21 +223,22 @@ class QlfFasmAssembler():
             base_name = one_feature.feature.split(".")
             base_name = ".".join(base_name[2:])
 
+            # Check if the feature exists
+            if base_name not in segbits:
+                raise self.LookupError
+
             # Lookup segbits, For 1-bit features try without the index suffix
             # first.
             bits = None
-            if one_feature.start in [0, None]:
-                key = base_name
-                bits = segbits.get(key, None)
+            if one_feature.start in [0, None]:            
+                bits = segbits[base_name].get(None, None)
 
             # Try with index
             if bits is None:
-                key = "{}[{}]".format(base_name, one_feature_idx)
-                bits = segbits.get(key, None)
+                bits = segbits[base_name].get(one_feature_idx, None)
 
+            # Not found            
             if bits is None:
-                logging.debug(one_feature)
-                logging.debug(base_name)
                 raise self.LookupError
 
             if not len(bits):
@@ -322,21 +323,58 @@ class QlfFasmDisassembler():
 
         return match
 
-    def disassemble_bitstream(self, bitstream, emit_unset=False):
+    def disassemble_bitstream(self, bitstream):
         """
         Disassembles a bistream.
         """
-        features = []
-        force_bit_features = []
 
-        def emit_feature(feature):
-            force_str = "force {}=1'b{};".format(feature, int(value))
-            curr_str = feature
-            if emit_unset:
-                curr_str = "{}=1'b{}".format(feature, int(value))
+        features = {}
 
-            features.append(curr_str)
-            force_bit_features.append(force_str)
+        def emit_feature(feature, width, index, value):
+            """
+            A helper function for FASM feature emission
+            """
+            if index is None:
+                index = 0
+            assert index < width, (index, width)
+
+            if feature not in features:
+                features[feature] = {k: 0 for k in range(width)}
+
+            features[feature][index] = int(value)
+
+        def convert_to_set_features(features):
+            """
+            Converts features to SetFasmFeature objects
+            """
+            set_features = []
+
+            for feature, data in features.items():
+                width = len(data)
+
+                # Single bit
+                if width == 1:
+                    set_features.append(fasm.SetFasmFeature(
+                        feature=feature,
+                        start=None,
+                        end=None,
+                        value=data[0],
+                        value_format=None
+                    ))
+
+                # Multi-bit
+                else:
+                    keys = sorted(data.keys(), reverse=True)
+                    bstr = "".join(["1" if data[k] else "0" for k in keys])
+                    set_features.append(fasm.SetFasmFeature(
+                        feature=feature,
+                        start=0,
+                        end=width - 1,
+                        value=int(bstr, 2),
+                        value_format=fasm.ValueFormat.VERILOG_BINARY
+                    ))
+
+            return set_features
 
         # Check size
         assert len(bitstream) == self.database.bitstream_size
@@ -363,15 +401,17 @@ class QlfFasmDisassembler():
 
             offset += self.database.regions[region]["offset"]
 
-            for feature, bits in segbits.items():
-                # Match
-                value = self.match_segbits(bits, offset)
-                if not value and not emit_unset:
-                    continue
+            for feature, data in segbits.items():
+                width = len(data)
 
-                # Emit
-                full_name = prefix + "." + feature
-                emit_feature(full_name)
+                for index, bits in data.items():
+
+                    # Match
+                    value = self.match_segbits(bits, offset)
+
+                    # Emit
+                    full_name = prefix + "." + feature
+                    emit_feature(full_name, width, index, value)
 
         # Disassemble routing
         for loc, routing in self.database.routing.items():
@@ -395,18 +435,21 @@ class QlfFasmDisassembler():
 
                 offset += self.database.regions[region]["offset"]
 
-                for feature, bits in segbits.items():
+                for feature, data in segbits.items():
+                    width = len(data)
+                    for index, bits in data.items():
 
-                    # Match
-                    value = self.match_segbits(bits, offset)
-                    if not value and not emit_unset:
-                        continue
+                        # Match
+                        value = self.match_segbits(bits, offset)
 
-                    # Emit
-                    full_name = prefix + "." + feature
-                    emit_feature(full_name)
+                        # Emit
+                        full_name = prefix + "." + feature
+                        emit_feature(full_name, width, index, value)
 
-        return features, force_bit_features
+
+        # Convert to SetFasmFeatures
+        features = convert_to_set_features(features)
+        return features
 
 # =============================================================================
 
@@ -463,23 +506,33 @@ def bitstream_to_fasm(args, database):
     # Disassemble
     logging.info("Disassembling bitstream...")
     disassembler = QlfFasmDisassembler(database)
-    features, force_bit_features = disassembler.disassemble_bitstream(
-        bitstream.to_bits(database), args.unset_features)
+    features = disassembler.disassemble_bitstream(
+        bitstream.to_bits(database))
 
     # Write FASM file
     logging.info("Writing FASM file...")
     with open(args.o, "w") as fp:
         for feature in features:
-            fp.write(feature + "\n")
+
+            if feature.value != 0 or args.unset_features:
+                fp.write(fasm.set_feature_to_str(feature) + "\n")
 
     # Write Force bit file
     logging.info("Writing Force bit file...")
     split_file = os.path.splitext(args.o)
     force_bit_file = "{}.force_bit".format(split_file[0])
     with open(force_bit_file, "w") as fp:
-        for feature in force_bit_features:
-            fp.write(feature + "\n")
+        for feature in features:
 
+            # Make single bit features
+            for one_feature in canonical_features(feature):
+
+                address = ""
+                if one_feature.start is not None:
+                    address = "[{}]".format(one_feature.start)
+
+                fp.write("force {}{}=1'b{}\n".format(
+                    one_feature.feature, address, int(one_feature.value)))
 
 
 # =============================================================================
