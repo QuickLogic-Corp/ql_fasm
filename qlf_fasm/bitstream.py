@@ -229,6 +229,9 @@ class FourByteBitstream(Bitstream):
             assert len(line) == 8, line
             words.append(int(line, 16))
 
+        # Reverse word order
+        words = words[::-1]
+
         # Separate bit planes
         bit_planes = [bytearray(len(words)) for i in range(32)]
         for i, w in enumerate(words):
@@ -298,6 +301,9 @@ class FourByteBitstream(Bitstream):
                     word |= (1 << b)
 
             words[i] = word
+
+        # Reverse the word order
+        words = words[::-1]
 
         # Convert words to text
         text = "\n".join(["{:08X}".format(w) for w in words])
