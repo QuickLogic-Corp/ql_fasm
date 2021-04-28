@@ -331,11 +331,11 @@ class QlfFasmDisassembler():
 
         def emit_feature(feature):
             force_str = "force {}=1'b{};".format(feature, int(value))
-            str = feature
+            curr_str = feature
             if emit_unset:
-                str = "{}=1'b{}".format(feature, int(value))
+                curr_str = "{}=1'b{}".format(feature, int(value))
 
-            features.append(str)
+            features.append(curr_str)
             force_bit_features.append(force_str)
 
         # Check size
