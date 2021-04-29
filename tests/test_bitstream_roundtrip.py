@@ -63,11 +63,14 @@ def bitstream_roundtrip(bitstream_file, bitstream_format):
 
         # Compare both FASM files
         with open(fasm1, "r") as fp:
-            fasm_lines1 = fp.readlines().sort()
+            fasm_lines1 = sorted(list(fp.readlines()))
         with open(fasm2, "r") as fp:
-            fasm_lines2 = fp.readlines().sort()
+            fasm_lines2 = sorted(list(fp.readlines()))
 
-        assert fasm_lines1 == fasm_lines2
+        assert len(fasm_lines1) == len(fasm_lines2)
+        for l1, l2 in zip(fasm_lines1, fasm_lines2):
+            assert l1 == l2
+
 
 
 @pytest.mark.skipif("QLF_FASM_DB_ROOT" not in os.environ, reason="QLF_FASM_DB_ROOT not set")
