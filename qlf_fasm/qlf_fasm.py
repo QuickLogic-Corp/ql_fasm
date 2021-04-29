@@ -527,11 +527,15 @@ def bitstream_to_fasm(args, database):
             # Make single bit features
             for one_feature in canonical_features(feature):
 
-                address = ""
-                if one_feature.start is not None:
-                    address = "[{}]".format(one_feature.start)
+                if not one_feature.value:
+                    continue
 
-                fp.write("force {}{}=1'b{}\n".format(
+                index = one_feature.start
+                if index is None:
+                    index = 0
+                    
+                address = "[{}]".format(index)
+                fp.write("force {}{}=1'b{};\n".format(
                     one_feature.feature, address, int(one_feature.value)))
 
 
