@@ -178,11 +178,20 @@ class FourByteBitstream(Bitstream):
     The "Four byte format" by QuickLogic.
     """
 
-    def __init__(self, init):
+    def __init__(self, init, checksums=None):
         assert isinstance(init, list)
         assert len(init) == 32
 
         self.bit_planes = init
+
+        if checksums is not None:
+            assert isinstance(checksums, tuple)
+            self.head_crc = checksums[0]
+            self.tail_crc = checksums[1]
+
+        else:
+            self.head_crc = None
+            self.tail_crc = None
 
     @staticmethod
     def from_bits(raw_bitstream, database):
@@ -209,7 +218,7 @@ class FourByteBitstream(Bitstream):
         return FourByteBitstream(bit_planes)
 
     @staticmethod
-    def from_file(file_name):
+    def from_file(file_name, with_crc=True):
         """
         Parses a textual bitstream file
         """
@@ -229,6 +238,14 @@ class FourByteBitstream(Bitstream):
             assert len(line) == 8, line
             words.append(int(line, 16))
 
+        # Extract checksums
+        if with_crc:
+            checksums = (words[0], words[1])
+            words = words[2:]
+
+        else:
+            checksums = None
+
         # Reverse word order
         words = words[::-1]
 
@@ -239,7 +256,7 @@ class FourByteBitstream(Bitstream):
                 bit_planes[b][i] = (w & (1 << b)) != 0
 
         # Return the object
-        return FourByteBitstream(bit_planes)
+        return FourByteBitstream(bit_planes, checksums)
 
     def to_bits(self, database):
         """
@@ -305,7 +322,106 @@ class FourByteBitstream(Bitstream):
         # Reverse the word order
         words = words[::-1]
 
+        # Append checksums if present
+        if self.head_crc is not None and self.tail_crc is not None:
+            words = [self.head_crc, self.tail_crc] + words
+
         # Convert words to text
         text = "\n".join(["{:08X}".format(w) for w in words])
         with open(file_name, "w") as fp:
             fp.write(text + "\n")
+
+    @staticmethod
+    def checksum(words, init=0):
+        """
+        Computes a checksum of a list of data words. Returns a tuple with the
+        checksum complement and last state of the checksum accumulator.
+        """
+
+        # Initialize
+        c0 = init & 0xFFFF
+        c1 = init >> 16
+
+        # Compute the checksum
+        for w in words:
+            hi = w >> 16
+            lo = w & 0xFFFF
+
+            c0 = (c0 + lo) & 0xFFFF
+            c1 = (c0 + c1) & 0xFFFF
+
+            c0 = (c0 + hi) & 0xFFFF
+            c1 = (c0 + c1) & 0xFFFF
+
+        # Compute the complement
+        cb0 = 0x10000 - ((c0 + c1 ) & 0xFFFF)
+        cb1 = 0x10000 - ((c0 + cb0) & 0xFFFF)
+
+        return (cb1 << 16) | cb0, (c1 << 16) | c0
+
+    def compute_checksums(self, database):
+        """
+        Computes pre-checksum (a.k.a. head checksum) and post-checksum (a.k.a.
+        tail checksum. The database object is needed to get individual chain
+        lengths.
+        """
+
+        total_length = max([len(plane) for plane in self.bit_planes])
+        words = [0] * total_length
+
+        # Assemble the bitstream into words for the head checksum
+        for i in range(total_length):
+            word = 0
+            for b in range(len(self.bit_planes)):
+                if self.bit_planes[b][i]:
+                    word |= (1 << b)
+            words[i] = word
+        words = words[::-1]
+
+        # Compute the head checksum
+        head_crc, _ = FourByteBitstream.checksum(words)
+
+        # Compute chain pad lengths
+        pad_length = {region_id: total_length - region["length"] \
+                      for region_id, region in database.regions.items()}
+
+        # Assemble the bitstream into words for the tail checksum. This has
+        # to encounter for the padding bits. In other words: chains are padded
+        # from the other end.
+        num_regions = len(database.regions)
+        for i in range(total_length):
+            word = 0
+            for b in range(num_regions):
+                ii = i - pad_length[b]
+                if ii >= 0:
+                    if self.bit_planes[b][ii]:
+                        word |= (1 << b)
+            words[i] = word
+        words = words[::-1]
+
+        # Compute the tail checksum.
+        # FIXME: Apparently the first word is ignored and there is one
+        # additional 0 at the end.
+        crc_words = words[1:] + [0]
+        tail_crc, _ = FourByteBitstream.checksum(crc_words)
+
+        return head_crc, tail_crc
+
+    def compute_and_set_checksums(self, database):
+        """
+        Computes checksums for the bitstream and stores them within the object
+        """
+        checksums = self.compute_checksums(database)
+
+        self.head_crc = checksums[0]
+        self.tail_crc = checksums[1]
+
+    def validate_checksums(self, database):
+        """
+        Computes and validates checksums. Returns True/False depending on the
+        validation status
+        """
+        assert self.head_crc is not None and self.tail_crc is not None
+
+        checksums = self.compute_checksums(database)
+        return checksums == (self.head_crc, self.tail_crc)

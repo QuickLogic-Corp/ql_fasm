@@ -481,8 +481,12 @@ def fasm_to_bitstream(args, database):
     logging.info("Writing bitstream...")
     if args.format == "txt":
         bitstream = TextBitstream.from_bits(assembler.bitstream, database)
+
     elif args.format == "4byte":
         bitstream = FourByteBitstream.from_bits(assembler.bitstream, database)
+        if not args.no_crc:
+            bitstream.compute_and_set_checksums(database)
+
     else:
         assert False, args.format
 
@@ -498,8 +502,40 @@ def bitstream_to_fasm(args, database):
     logging.info("Reading bitstream...")
     if args.format == "txt":
         bitstream = TextBitstream.from_file(args.i)
+
     elif args.format == "4byte":
-        bitstream = FourByteBitstream.from_file(args.i)
+        bitstream = FourByteBitstream.from_file(args.i, not args.no_crc)
+
+        # Validate checksum
+        if not args.no_crc:
+
+            # CRC mismatch
+            if not bitstream.validate_checksums(database):
+
+                # If the CRC check is disabled print a warning, otherwise an
+                # error
+                if args.no_check_crc:
+                    level = logging.WARNING
+                else:
+                    level = logging.CRITICAL
+
+                ref_checksums = bitstream.compute_checksums(database)
+                logging.log(level, "Bitstream CRC mismatch!")
+                logging.log(level, " head: {:08X}, should be {:08X}".format(
+                            bitstream.head_crc, ref_checksums[0]))
+                logging.log(level, " tail: {:08X}, should be {:08X}".format(
+                            bitstream.tail_crc, ref_checksums[1]))
+
+                # CRC check enabled and failed
+                if not args.no_check_crc:
+                    exit(-1)
+
+            # CRC ok
+            else:
+                logging.info("Bitstream CRC ok")
+                logging.debug(" head: {:08X}".format(bitstream.head_crc))
+                logging.debug(" tail: {:08X}".format(bitstream.tail_crc))
+
     else:
         assert False, args.format
 
@@ -587,6 +623,16 @@ def main():
         "--unset-features",
         action="store_true",
         help="When disassembling write cleared FASM features as well"
+    )
+    parser.add_argument(
+        "--no-crc",
+        action="store_true",
+        help="Disable reading and writing CRC for the 4-byte bitstream format",
+    )
+    parser.add_argument(
+        "--no-check-crc",
+        action="store_true",
+        help="Disable CRC check when disassembling a bitstream in 4-byte format"
     )
     parser.add_argument(
         "--log-level",
