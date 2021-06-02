@@ -1,0 +1,32 @@
+name: Run tests
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        test: [ 'tests/test_force_bit.py', 'tests/test_bitstream_roundtrip.py' ]
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          submodules: true
+      - name: Clone FASM database
+        uses: actions/checkout@v2
+        with:
+          repository: 'QuickLogic-Corp/qlfpga-symbiflow-plugins'
+          path: 'database'
+      - uses: actions/setup-python@v2
+        with:
+          python-version: '3.x'
+      - uses: BSFishy/pip-action@v1
+        with:
+          requirements: requirements.txt
+          packages: pytest
+      - name: Run pytest
+        env:
+          QLF_FASM_DB_ROOT: database/qlf_k4n8/fasm_database/
+        run: pytest ${{ matrix.test }}
