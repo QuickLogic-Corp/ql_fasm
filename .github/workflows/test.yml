@@ -9,7 +9,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [ 'tests/test_force_bit.py', 'tests/test_bitstream_roundtrip.py' ]
+        test: [ 'tests/test_force_bit.py', 'tests/test_bitstream_roundtrip.py', 'tests/test_default_bitstream.py', 'tests/test_error_checking.py']
     steps:
       - uses: actions/checkout@v2
         with:
