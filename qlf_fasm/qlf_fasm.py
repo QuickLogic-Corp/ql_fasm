@@ -280,7 +280,7 @@ class QlfFasmAssembler():
                         msg = "The line '{}' wants to {} bit {} already {} by the line '{}'".format(
                             line_str,
                             new_bit_act,
-                            bit.id,
+                            bit.idx,
                             org_bit_act,
                             self.features_by_bits[address]
                         )
@@ -513,18 +513,35 @@ def fasm_to_bitstream(args, database):
     Implements FASM to bitstream flow
     """
 
+    # Determine if and where to load default bitstream from
+    default_bitstream_file = None
+    default_bitstream_format = None
+
+    if not args.no_default_bitstream:
+
+        # Use args
+        if args.default_bitstream:
+            default_bitstream_file = args.default_bitstream
+            default_bitstream_format = args.default_bitstream_format
+
+        # Use database
+        elif database.default_bitstream_file:
+            default_bitstream_file = database.default_bitstream_file
+            default_bitstream_format = database.default_bitstream_format
+
     # Load the default binary bitstream
-    if args.default_bitstream:
+    if default_bitstream_file:
         logging.info("Reading default bitstream...")
 
-        if args.default_bitstream_format == "txt":
-            default_bitstream = TextBitstream.from_file(args.default_bitstream)
+        if default_bitstream_format == "txt":
+            default_bitstream = TextBitstream.from_file(default_bitstream_file)
 
-        elif args.default_bitstream_format == "4byte":
+        elif default_bitstream_format == "4byte":
             default_bitstream = FourByteBitstream.from_file(
-                args.default_bitstream,
-                not args.no_crc)
+                default_bitstream_file)
             validate_crc(args, default_bitstream, database)
+
+        default_bitstream = default_bitstream.to_bits(database)
 
     else:
         default_bitstream = None
@@ -535,7 +552,7 @@ def fasm_to_bitstream(args, database):
     fasm_lines = fasm.parse_fasm_filename(args.i)
 
     # Assemble
-    assembler = QlfFasmAssembler(database, default_bitstream.to_bits(database))
+    assembler = QlfFasmAssembler(database, default_bitstream)
     unknown_features = assembler.assemble_bitstream(fasm_lines)
 
     # Got unknown features

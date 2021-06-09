@@ -73,6 +73,10 @@ class Database():
         # Bit regions
         self.regions = {}
 
+        # Default bitstream file name and format
+        self.default_bitstream_file = None
+        self.default_bitstream_format = None
+
         # Load the database
         if root is not None:
             self.load(root)
@@ -98,6 +102,13 @@ class Database():
         self.regions = {
             int(region["id"]): region for region in configuration["regions"]
         }
+
+        # Get default bitstream file and format if any
+        if "default_bitstream" in json_root:
+            self.default_bitstream_file = os.path.join(path,
+                json_root["default_bitstream"]["file"])
+            self.default_bitstream_format = \
+                json_root["default_bitstream"]["format"]
 
         # Sort tiles by their locations, load segbits
         for data in json_root["tiles"]:
