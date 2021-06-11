@@ -1,0 +1,3 @@
+fpga_top.grid_clb_0__0_.FF.NOT_ZINIT
+fpga_top.grid_clb_1__1_.FF.NOT_ZINIT
+fpga_top.grid_clb_1__1_.LUT.INIT[1:0]=2'b11

@@ -18,6 +18,10 @@ from .bitstream import TextBitstream, FourByteBitstream
 # Common FASM feature prefix
 FEATURE_PREFIX = "fpga_top"
 
+# Prefix used to invert all bits in a FASM feature. Has to be applied to the
+# last part of a feature name.
+INVERSION_PREFIX = "NOT_"
+
 # =============================================================================
 
 def canonical_features(set_feature):
@@ -115,9 +119,14 @@ class QlfFasmAssembler():
         """
         pass
 
-    def __init__(self, database):
-        self.bitstream = bytearray(database.bitstream_size)
+    def __init__(self, database, bitstream=None):
         self.database = database
+
+        if bitstream is None:
+            self.bitstream = bytearray(database.bitstream_size)
+        else:
+            assert len(bitstream) == database.bitstream_size
+            self.bitstream = bitstream
 
         self.features = {}
         self.force_bit_features = {}
@@ -220,7 +229,15 @@ class QlfFasmAssembler():
             if one_feature.value == 0:
                 continue
 
+            # Format the base name, determine inversion
             base_name = one_feature.feature.split(".")
+
+            if base_name[-1].startswith(INVERSION_PREFIX):
+                base_name[-1] = base_name[-1][len(INVERSION_PREFIX):]
+                is_inverted = True
+            else:
+                is_inverted = False
+
             base_name = ".".join(base_name[2:])
 
             # Check if the feature exists
@@ -250,19 +267,20 @@ class QlfFasmAssembler():
             # Apply them to the bitstream
             for bit in bits:
                 address = bit.idx + offset
+                value = bit.val ^ is_inverted
 
                 # Check for conflict
                 if address in self.features_by_bits:
-                    if bit.val != self.bitstream[address]:
+                    if value != self.bitstream[address]:
 
-                        new_bit_act = "set" if bit.val else "clear"
+                        new_bit_act = "set" if value else "clear"
                         org_bit_act = "set" if self.bitstream[address] else "cleared"
 
                         # Format the error message
                         msg = "The line '{}' wants to {} bit {} already {} by the line '{}'".format(
                             line_str,
                             new_bit_act,
-                            bit.id,
+                            bit.idx,
                             org_bit_act,
                             self.features_by_bits[address]
                         )
@@ -271,7 +289,7 @@ class QlfFasmAssembler():
                     self.features_by_bits[address] = set()
 
                 # Set/clear the bit
-                self.bitstream[address] = bit.val
+                self.bitstream[address] = value
                 self.features_by_bits[address].add(line_str)
 
 
@@ -454,10 +472,79 @@ class QlfFasmDisassembler():
 # =============================================================================
 
 
+def validate_crc(args, bitstream, database):
+    """
+    Validates bitstream CRC. A helper function.
+    """
+
+    # Validate checksum
+    if not args.no_crc:
+
+        # CRC mismatch
+        if not bitstream.validate_checksums(database):
+
+            # If the CRC check is disabled print a warning, otherwise an
+            # error
+            if args.no_check_crc:
+                level = logging.WARNING
+            else:
+                level = logging.CRITICAL
+
+            ref_checksums = bitstream.compute_checksums(database)
+            logging.log(level, "Bitstream CRC mismatch!")
+            logging.log(level, " head: {:08X}, should be {:08X}".format(
+                        bitstream.head_crc, ref_checksums[0]))
+            logging.log(level, " tail: {:08X}, should be {:08X}".format(
+                        bitstream.tail_crc, ref_checksums[1]))
+
+            # CRC check enabled and failed
+            if not args.no_check_crc:
+                exit(-1)
+
+        # CRC ok
+        else:
+            logging.info("Bitstream CRC ok")
+            logging.debug(" head: {:08X}".format(bitstream.head_crc))
+            logging.debug(" tail: {:08X}".format(bitstream.tail_crc))
+
+
 def fasm_to_bitstream(args, database):
     """
     Implements FASM to bitstream flow
     """
+
+    # Determine if and where to load default bitstream from
+    default_bitstream_file = None
+    default_bitstream_format = None
+
+    if not args.no_default_bitstream:
+
+        # Use args
+        if args.default_bitstream:
+            default_bitstream_file = args.default_bitstream
+            default_bitstream_format = args.default_bitstream_format
+
+        # Use database
+        elif database.default_bitstream_file:
+            default_bitstream_file = database.default_bitstream_file
+            default_bitstream_format = database.default_bitstream_format
+
+    # Load the default binary bitstream
+    if default_bitstream_file:
+        logging.info("Reading default bitstream...")
+
+        if default_bitstream_format == "txt":
+            default_bitstream = TextBitstream.from_file(default_bitstream_file)
+
+        elif default_bitstream_format == "4byte":
+            default_bitstream = FourByteBitstream.from_file(
+                default_bitstream_file)
+            validate_crc(args, default_bitstream, database)
+
+        default_bitstream = default_bitstream.to_bits(database)
+
+    else:
+        default_bitstream = None
 
     logging.info("Assembling bitstream from FASM...")
 
@@ -465,7 +552,7 @@ def fasm_to_bitstream(args, database):
     fasm_lines = fasm.parse_fasm_filename(args.i)
 
     # Assemble
-    assembler = QlfFasmAssembler(database)
+    assembler = QlfFasmAssembler(database, default_bitstream)
     unknown_features = assembler.assemble_bitstream(fasm_lines)
 
     # Got unknown features
@@ -505,36 +592,7 @@ def bitstream_to_fasm(args, database):
 
     elif args.format == "4byte":
         bitstream = FourByteBitstream.from_file(args.i, not args.no_crc)
-
-        # Validate checksum
-        if not args.no_crc:
-
-            # CRC mismatch
-            if not bitstream.validate_checksums(database):
-
-                # If the CRC check is disabled print a warning, otherwise an
-                # error
-                if args.no_check_crc:
-                    level = logging.WARNING
-                else:
-                    level = logging.CRITICAL
-
-                ref_checksums = bitstream.compute_checksums(database)
-                logging.log(level, "Bitstream CRC mismatch!")
-                logging.log(level, " head: {:08X}, should be {:08X}".format(
-                            bitstream.head_crc, ref_checksums[0]))
-                logging.log(level, " tail: {:08X}, should be {:08X}".format(
-                            bitstream.tail_crc, ref_checksums[1]))
-
-                # CRC check enabled and failed
-                if not args.no_check_crc:
-                    exit(-1)
-
-            # CRC ok
-            else:
-                logging.info("Bitstream CRC ok")
-                logging.debug(" head: {:08X}".format(bitstream.head_crc))
-                logging.debug(" tail: {:08X}".format(bitstream.tail_crc))
+        validate_crc(args, bitstream, database)
 
     else:
         assert False, args.format
@@ -602,6 +660,24 @@ def main():
         choices=["txt", "4byte"],
         default="4byte",
         help="Binary bitstream format (def. '4byte')"
+    )
+    parser.add_argument(
+        "--no-default-bitstream",
+        action="store_true",
+        help="If FASM database provides a default bitstream, don't use it."
+    )
+    parser.add_argument(
+        "--default-bitstream",
+        type=str,
+        default=None,
+        help="Path to an external default binary bitstream to overlay FASM on"
+    )
+    parser.add_argument(
+        "--default-bitstream-format",
+        type=str,
+        choices=["txt", "4byte"],
+        default="4byte",
+        help="External default binary bitstream format (def. '4byte')"
     )
     parser.add_argument(
         "-a", "--assemble",

@@ -15,6 +15,10 @@
       }
     ]
   },
+  "default_bitstream": {
+    "file": "default_bitstream.hex",
+    "format": "4byte"
+  },
   "tiles": [
     {
       "type": "clb",
